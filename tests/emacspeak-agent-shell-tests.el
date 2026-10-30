@@ -3256,6 +3256,10 @@ Return speech events plus the target character.  DIRECTION is `forward' or
               (cl-letf
                   (((symbol-function 'shell-maker-busy) (lambda () nil))
                    ((symbol-function 'shell-maker-point-at-last-prompt-p)
+                    (lambda () t))
+                   ;; What agent-shell asks since the persistent prompt; the
+                   ;; buffer here is not a live shell, so it has to be told.
+                   ((symbol-function 'agent-shell--point-in-live-input-p)
                     (lambda () t)))
                 (setq events
                       (emacspeak-agent-shell-test--capture-events
@@ -4012,15 +4016,15 @@ Return speech events plus the target character.  DIRECTION is `forward' or
         (should
          (equal
           (substring-no-properties rendered)
-          "[…] Wait step\n[…] Busy step\n[✓] Done step\n[✗] Failed step"))
+          "[◔] Wait step\n[◔] Busy step\n[✓] Done step\n[✗] Failed step"))
         (should
          (equal
           (substring-no-properties spoken)
           (concat
            "[ pending ] Wait step\n[ in progress ] Busy step\n"
            "[ completed ] Done step\n[ failed ] Failed step")))
-        (should (string-match-p "…" rendered))
-        (should-not (string-match-p "[…✓✗]" spoken))
+        (should (string-match-p "◔" rendered))
+        (should-not (string-match-p "[◔✓✗]" spoken))
         (let ((position (string-match "pending" spoken)))
           (should position)
           (should
@@ -4036,14 +4040,14 @@ Return speech events plus the target character.  DIRECTION is `forward' or
             '((pending . "waiting")))
            (rendered
             (concat
-             (propertize "…" 'font-lock-face 'agent-shell-pending)
-             " ordinary …"))
+             (propertize "◔" 'font-lock-face 'agent-shell-pending)
+             " ordinary ◔"))
            (spoken
             (emacspeak-agent-shell--prepare-speech-text rendered)))
       (should (equal (substring-no-properties spoken)
-                     " waiting  ordinary …"))
+                     " waiting  ordinary ◔"))
       (should (equal (substring-no-properties rendered)
-                     "… ordinary …")))))
+                     "◔ ordinary ◔")))))
 
 (ert-deftest emacspeak-agent-shell-markdown-face-inventory-is-current ()
   "Every current agent-shell Markdown face should be classified."

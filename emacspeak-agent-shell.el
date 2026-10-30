@@ -327,8 +327,8 @@ properties while copying TEXT into its private scratch buffer."
 ;; property.  Keep this glyph/face compatibility adapter isolated here; the
 ;; rendered-plan fixture test detects upstream rendering drift.
 (defconst emacspeak-agent-shell--status-icon-contexts
-  '((?… agent-shell-pending pending)
-    (?… agent-shell-warning in-progress)
+  '((?◔ agent-shell-pending pending)
+    (?◔ agent-shell-warning in-progress)
     (?✓ agent-shell-success completed)
     (?✗ agent-shell-error failed))
   "Rendered icon, face, and semantic status triples used for speech.")
