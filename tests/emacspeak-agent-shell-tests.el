@@ -15,6 +15,12 @@
 (require 'subr-x)
 (require 'emacspeak-agent-shell)
 
+;; Declared here as well as in the module: a `defvar' with no value marks the
+;; symbol special only inside its own file, and without it the `let's that
+;; choose a route below would bind lexically and the module would not see them.
+(defvar agent-shell-busy-submit-default-function)
+(defvar agent-shell-busy-submit-override-function)
+
 (defvar emacspeak-agent-shell--advice-list)
 (defvar emacspeak-agent-shell--lifecycle-subscription)
 (defvar emacspeak-agent-shell--permission-action-cache)
@@ -3797,14 +3803,55 @@ Return speech events plus the target character.  DIRECTION is `forward' or
                  (should (eq (plist-get arguments :shell-buffer)
                              (current-buffer)))
                  status)))
-      (dolist (case '((ready submitted)
-                      (busy queued)
-                      (blocked queued)
-                      (unknown nil)))
-        (setq status (car case))
-        (should
-         (eq (emacspeak-agent-shell--viewport-submit-disposition)
-             (cadr case))))))
+      ;; Steering unavailable: a busy session queues, as it always did.
+      (let ((agent-shell-busy-submit-default-function
+             #'agent-shell-busy-submit-steer))
+        (cl-letf (((symbol-function 'agent-shell-steering-supported-p)
+                   (lambda (&rest _) nil)))
+          (dolist (case '((ready submitted)
+                          (busy queued)
+                          (blocked queued)
+                          (unknown nil)))
+            (setq status (car case))
+            (should
+             (eq (emacspeak-agent-shell--viewport-submit-disposition)
+                 (cadr case))))))
+      ;; Steering available and chosen: a session waiting on a permission
+      ;; answer is routed like a busy one.
+      (let ((agent-shell-busy-submit-default-function
+             #'agent-shell-busy-submit-steer))
+        (cl-letf (((symbol-function 'agent-shell-steering-supported-p)
+                   (lambda (&rest _) t)))
+          (dolist (case '((ready submitted)
+                          (busy steering)
+                          (blocked steering)
+                          (unknown nil)))
+            (setq status (car case))
+            (should
+             (eq (emacspeak-agent-shell--viewport-submit-disposition)
+                 (cadr case))))))
+      ;; A route that queues queues, even where the agent would steer, and
+      ;; the override route is read only when asked for.
+      (let ((agent-shell-busy-submit-default-function
+             #'agent-shell-busy-submit-queue)
+            (agent-shell-busy-submit-override-function
+             #'agent-shell-busy-submit-steer))
+        (cl-letf (((symbol-function 'agent-shell-steering-supported-p)
+                   (lambda (&rest _) t)))
+          (setq status 'busy)
+          (should (eq (emacspeak-agent-shell--viewport-submit-disposition)
+                      'queued))
+          (should (eq (emacspeak-agent-shell--viewport-submit-disposition
+                       :override)
+                      'steering))))
+      ;; A steering function of the configuration's own counts once listed.
+      (let ((agent-shell-busy-submit-default-function 'test-steer)
+            (emacspeak-agent-shell-steering-submit-functions '(test-steer)))
+        (cl-letf (((symbol-function 'agent-shell-steering-supported-p)
+                   (lambda (&rest _) t)))
+          (setq status 'busy)
+          (should (eq (emacspeak-agent-shell--viewport-submit-disposition)
+                      'steering))))))
   (cl-letf (((symbol-function 'emacspeak-agent-shell--session-buffer)
              (lambda (&optional _) (user-error "No session"))))
     (should-not (emacspeak-agent-shell--viewport-submit-disposition)))
@@ -3853,6 +3900,31 @@ Return speech events plus the target character.  DIRECTION is `forward' or
             (call-interactively #'agent-shell-viewport-compose-send))
           '((icon close-object)
             (speak "Prompt queued."))))
+        (should sent)))))
+
+(ert-deftest emacspeak-agent-shell-viewport-override-announces-its-route ()
+  "The override command should announce once, from the override route."
+  (let ((agent-shell-prefer-viewport-interaction t)
+        (agent-shell-session-strategy 'new-deferred)
+        routes
+        sent)
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-viewport-edit-mode)
+      (cl-letf (((symbol-function
+                  'agent-shell-viewport-compose-send-and-wait-for-response)
+                 (lambda () (setq sent t)))
+                ((symbol-function
+                  'emacspeak-agent-shell--viewport-submit-disposition)
+                 (lambda (&optional override)
+                   (push override routes)
+                   'steering)))
+        (should
+         (equal
+          (emacspeak-agent-shell-test--capture-events
+            (call-interactively #'agent-shell-viewport-compose-send-override))
+          '((icon modified-object)
+            (speak "Steering."))))
+        (should (equal routes '(:override)))
         (should sent)))))
 
 (ert-deftest emacspeak-agent-shell-viewport-submit-announces-continued-compose ()
@@ -4298,6 +4370,85 @@ Return speech events plus the target character.  DIRECTION is `forward' or
         (cancel-timer timer))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest emacspeak-agent-shell-viewport-submit-announces-steering ()
+  "A steered prompt should say so, with a cue of its own."
+  (let ((agent-shell-prefer-viewport-interaction t)
+        (agent-shell-session-strategy 'new-deferred)
+        sent)
+    (with-temp-buffer
+      (setq major-mode 'agent-shell-viewport-edit-mode)
+      (cl-letf (((symbol-function
+                  'agent-shell-viewport-compose-send-and-wait-for-response)
+                 (lambda () (setq sent t)))
+                ((symbol-function
+                  'emacspeak-agent-shell--viewport-submit-disposition)
+                 (lambda () 'steering)))
+        (should
+         (equal
+          (emacspeak-agent-shell-test--capture-events
+            (call-interactively #'agent-shell-viewport-compose-send))
+          ;; Not the send/dismiss cue: steering redirects work already
+          ;; running rather than handing over something new.
+          '((icon modified-object)
+            (speak "Steering."))))
+        (should sent)))))
+
+(ert-deftest emacspeak-agent-shell-steered-prompt-navigates-as-a-user-prompt ()
+  "A steered prompt should be found and bounded by user-prompt navigation.
+
+Covers the seam between the two repositories: agent-shell renders the
+steered prompt, and this module's `C-c [' navigation has to find it and
+speak it.  Bounding is the part that breaks quietly -- the block's end is
+the next `shell-maker--marker', so a prompt rendered without one runs on
+and is spoken together with the whole response that follows it."
+  (skip-unless (fboundp 'agent-shell-experimental--render-steered-prompt))
+  (let* ((buffer (get-buffer-create " *steered-prompt-test*"))
+         (process (start-process "steered-prompt-test" buffer "cat")))
+    (set-process-query-on-exit-flag process nil)
+    (unwind-protect
+        (with-current-buffer buffer
+          (comint-mode)
+          (setq major-mode 'agent-shell-mode)
+          ;; `shell-maker--process' resolves the process through the config's
+          ;; buffer name, so point that at this buffer rather than the shell
+          ;; a real session would own.
+          (setq-local shell-maker--buffer-name-override (buffer-name buffer))
+          (setq-local shell-maker--config
+                      (agent-shell--make-shell-maker-config
+                       :prompt "Fake> " :prompt-regexp "Fake> "))
+          (setq-local comint-prompt-regexp "Fake> ")
+          (set-marker (process-mark process) (point-max))
+          (let ((state (list (cons :buffer buffer)
+                             (cons :chunked-group-count 0)
+                             (cons :last-entry-type nil)
+                             (cons :request-count 1)
+                             (cons :agent-config (list (cons :shell-prompt "Fake> "))))))
+            (setq-local agent-shell--state state)
+            ;; This buffer has no live prompt for agent-shell to render
+            ;; above, which the persistent prompt requires.
+            (cl-letf (((symbol-function 'agent-shell--append-transcript) #'ignore)
+                      (agent-shell-persistent-prompt-enabled nil))
+              (agent-shell-experimental--render-steered-prompt
+               :state state :prompt "actually, just the filenames"))
+            ;; The rest of the turn, which must not be read as the prompt.
+            (let ((inhibit-read-only t))
+              (goto-char (point-max))
+              (insert "\n\nHere is a long answer that keeps going and going.\n")))
+          (let ((location (emacspeak-agent-shell--prompt-location-in-direction
+                           'backward (point-max))))
+            (should (eq (plist-get location :type) 'user-prompt))
+            (should (equal (plist-get location :body)
+                           "Fake> [steer] actually, just the filenames")))
+          ;; And comint agrees it is a prompt, so ordinary prompt motion stops
+          ;; here too.
+          (goto-char (point-min))
+          (should (comint-next-prompt 1)))
+      (when (process-live-p process)
+        (kill-process process))
+      (when (buffer-live-p buffer)
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer buffer))))))
 
 (provide 'emacspeak-agent-shell-tests)
 ;;; emacspeak-agent-shell-tests.el ends here

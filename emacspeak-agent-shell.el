@@ -3706,14 +3706,52 @@ the corresponding buffer boundary."
     (emacspeak-icon 'task-done)
     (message "Viewport refreshed")))
 
-(defun emacspeak-agent-shell--viewport-submit-disposition ()
+;; Defined by agent-shell-prompt-queue, which may not have loaded yet.
+(defvar agent-shell-busy-submit-default-function)
+(defvar agent-shell-busy-submit-override-function)
+
+(defcustom emacspeak-agent-shell-steering-submit-functions
+  '(agent-shell-busy-submit-steer)
+  "Busy-submit functions that steer a prompt into the running turn.
+agent-shell hands a prompt sent mid-turn to the function named by
+`agent-shell-busy-submit-default-function', or by
+`agent-shell-busy-submit-override-function' for the override command.
+A function listed here is announced as steering, and any other as
+queueing.  A configuration that installs a steering function of its own
+adds it here."
+  :type '(repeat function)
+  :group 'emacspeak-agent-shell)
+
+(defun emacspeak-agent-shell--steering-intended-p (shell-buffer &optional override)
+  "Return non-nil when a prompt sent to SHELL-BUFFER now would steer.
+OVERRIDE means the prompt goes through the override route.
+
+Mirrors the shell's own decision so the keystroke can be answered
+without waiting for the agent."
+  (let ((variable (if override
+                      'agent-shell-busy-submit-override-function
+                    'agent-shell-busy-submit-default-function)))
+    (and (boundp variable)
+         (memq (symbol-value variable)
+               emacspeak-agent-shell-steering-submit-functions)
+         (fboundp 'agent-shell-steering-supported-p)
+         (agent-shell-steering-supported-p :shell-buffer shell-buffer))))
+
+(defun emacspeak-agent-shell--viewport-submit-disposition (&optional override)
   "Return how a viewport prompt will be handled, or nil when unknown.
+OVERRIDE means the prompt goes through the override route.
 The public session status is sampled before submission because a successful
-direct submission immediately changes it to busy."
+direct submission immediately changes it to busy.
+
+A shell waiting on a permission answer counts as busy: agent-shell
+routes a prompt sent to it the same way."
   (condition-case nil
       (when-let* ((shell-buffer (emacspeak-agent-shell--session-buffer)))
         (pcase (agent-shell-status :shell-buffer shell-buffer)
-          ((or 'busy 'blocked) 'queued)
+          ((or 'busy 'blocked)
+           (if (emacspeak-agent-shell--steering-intended-p shell-buffer override)
+               'steering
+             'queued))
           ('ready 'submitted)))
     (error nil)))
 
@@ -3724,6 +3762,9 @@ KEEP-COMPOSING means the cleared editor remains ready for another prompt.
 DISMISS means the compose window is dismissed."
   (concat
    (pcase disposition
+     ;; Kept to one word: a steer provokes an answer within a couple of
+     ;; seconds, and that answer stops this announcement partway through.
+     ('steering "Steering.")
      ('queued "Prompt queued.")
      ('submitted "Prompt submitted.")
      (_ "Prompt sent."))
@@ -3739,6 +3780,27 @@ DISMISS means the compose window is dismissed."
    'agent-shell-viewport-compose-send 'after 'emacspeak)
   (ad-activate 'agent-shell-viewport-compose-send))
 
+(defun emacspeak-agent-shell--viewport-send-dismisses-p (keep-composing)
+  "Return non-nil when a viewport send dismisses the compose window.
+KEEP-COMPOSING is the send's prefix argument, which keeps it open."
+  (and (not keep-composing)
+       (boundp 'agent-shell-viewport-dismiss-on-send)
+       agent-shell-viewport-dismiss-on-send))
+
+(defun emacspeak-agent-shell--speak-viewport-submit
+    (disposition keep-composing dismiss)
+  "Cue and describe a completed viewport send.
+DISPOSITION, KEEP-COMPOSING and DISMISS are as for
+`emacspeak-agent-shell--viewport-submit-announcement'."
+  ;; Steering changes work already under way rather than adding to it,
+  ;; so it gets its own cue instead of the send/dismiss pair.
+  (emacspeak-icon (cond ((eq disposition 'steering) 'modified-object)
+                        (keep-composing 'task-done)
+                        (t 'close-object)))
+  (dtk-speak
+   (emacspeak-agent-shell--viewport-submit-announcement
+    disposition keep-composing dismiss)))
+
 (defadvice agent-shell-viewport-compose-send (around emacspeak pre act comp)
   "Announce whether a prompt was submitted or queued and where focus remains."
   (let* ((interactive-p (ems-interactive-p))
@@ -3746,18 +3808,34 @@ DISMISS means the compose window is dismissed."
           (and interactive-p (ignore-errors (ad-get-arg 0))))
          (dismiss
           (and interactive-p
-               (not keep-composing)
-               (boundp 'agent-shell-viewport-dismiss-on-send)
-               agent-shell-viewport-dismiss-on-send))
+               (emacspeak-agent-shell--viewport-send-dismisses-p keep-composing)))
          (disposition
           (and interactive-p
                (emacspeak-agent-shell--viewport-submit-disposition))))
     ad-do-it
     (when interactive-p
-      (emacspeak-icon (if keep-composing 'task-done 'close-object))
-      (dtk-speak
-       (emacspeak-agent-shell--viewport-submit-announcement
-        disposition keep-composing dismiss)))))
+      (emacspeak-agent-shell--speak-viewport-submit
+       disposition keep-composing dismiss))))
+
+;; The override command sends by calling `agent-shell-viewport-compose-send'
+;; as a function, and the advice above speaks only for the command that was
+;; dispatched, so this one announces for itself.  Its disposition is sampled
+;; here, before the command rebinds the default route to the override one.
+(defadvice agent-shell-viewport-compose-send-override (around emacspeak pre act comp)
+  "Announce what the override route did with the prompt."
+  (let* ((interactive-p (ems-interactive-p))
+         (keep-composing
+          (and interactive-p (ignore-errors (ad-get-arg 0))))
+         (dismiss
+          (and interactive-p
+               (emacspeak-agent-shell--viewport-send-dismisses-p keep-composing)))
+         (disposition
+          (and interactive-p
+               (emacspeak-agent-shell--viewport-submit-disposition :override))))
+    ad-do-it
+    (when interactive-p
+      (emacspeak-agent-shell--speak-viewport-submit
+       disposition keep-composing dismiss))))
 
 (defadvice agent-shell-viewport-compose-cancel (around emacspeak pre act comp)
   "Announce an accepted prompt composition cancellation."
@@ -3979,6 +4057,7 @@ DISMISS means the compose window is dismissed."
     (agent-shell-prompt-compose after)
     (agent-shell-viewport-refresh after)
     (agent-shell-viewport-compose-send around)
+    (agent-shell-viewport-compose-send-override around)
     (agent-shell-viewport-compose-cancel around)
     (agent-shell-viewport-view-mode after)
     (agent-shell-viewport-edit-mode after))
@@ -3991,6 +4070,12 @@ DISMISS means the compose window is dismissed."
                  emacspeak-agent-shell--advice-list)))
     (setcdr entry '(around))
   (push '(agent-shell-viewport-compose-send around)
+        emacspeak-agent-shell--advice-list))
+
+;; Likewise for a session that loaded a version predating the override route.
+(unless (assq 'agent-shell-viewport-compose-send-override
+              emacspeak-agent-shell--advice-list)
+  (push '(agent-shell-viewport-compose-send-override around)
         emacspeak-agent-shell--advice-list))
 
 ;; `defvar' preserves the advice list when this development file is reloaded.
