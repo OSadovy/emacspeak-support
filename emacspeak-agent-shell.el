@@ -1336,6 +1336,33 @@ the body retains semantic faces and omits markup that is no longer displayed."
          (emacspeak-agent-shell--deliver-announcement
           'warn-user "Agent stopped for an unknown reason."))))))
 
+(defun emacspeak-agent-shell--speak-steering-outcome (event)
+  "Correct the steering announcement when EVENT reports something else.
+
+Sending already said \"Steering\", which is right whenever the prompt
+reached the running turn, so `injected' says nothing further.  The rest
+are cases where the shell did something other than what was announced,
+and silence would leave a wrong belief standing.
+
+A declined steer is the one that costs something: the prompt never
+reached the agent and the turn that was running is cancelled, so saying
+nothing would leave the work looking as though it were still going."
+  (pcase (map-nested-elt event '(:data :outcome))
+    ('injected nil)
+    ('prompt-required
+     (emacspeak-agent-shell--deliver-announcement
+      'item "Agent was idle. Prompt submitted."))
+    ('started-new-turn
+     (emacspeak-agent-shell--deliver-announcement
+      'warn-user
+      "Agent was idle. Started a new turn; its output appears out of turn."))
+    ('declined
+     (emacspeak-agent-shell--deliver-announcement
+      'warn-user "Steer declined. Running turn interrupted."))
+    (_
+     (emacspeak-agent-shell--deliver-announcement
+      'warn-user "Steer did not land."))))
+
 (defun emacspeak-agent-shell--handle-lifecycle-event (event)
   "Provide semantic processing feedback for public agent-shell EVENT."
   (let ((event-type (map-elt event :event)))
@@ -1362,6 +1389,8 @@ the body retains semantic faces and omits markup that is no longer displayed."
         ('init-finished
          (when (emacspeak-agent-shell--speech-level-at-least-p 'full)
            (emacspeak-icon emacspeak-agent-shell-processing-end-icon)))
+        ('prompt-steered
+         (emacspeak-agent-shell--speak-steering-outcome event))
         ('turn-complete
          (emacspeak-agent-shell--speak-turn-completion event))
         ('error
@@ -3727,7 +3756,9 @@ adds it here."
 OVERRIDE means the prompt goes through the override route.
 
 Mirrors the shell's own decision so the keystroke can be answered
-without waiting for the agent."
+without waiting for the agent.  Where the two disagree -- the turn ends
+in between, or the agent refuses -- the `prompt-steered' event corrects
+it (see `emacspeak-agent-shell--speak-steering-outcome')."
   (let ((variable (if override
                       'agent-shell-busy-submit-override-function
                     'agent-shell-busy-submit-default-function)))

@@ -4481,6 +4481,59 @@ That is an empty prompt, and a submission held back while reconnecting."
             (speak "Steering."))))
         (should sent)))))
 
+(ert-deftest emacspeak-agent-shell-steering-outcome-corrects-only-when-wrong ()
+  "Sending announced steering, so only a different outcome is spoken."
+  (cl-letf (((symbol-function 'emacspeak-agent-shell--session-focused-p)
+             (lambda (&rest _) t)))
+    ;; The announcement made at send time was already right.
+    (should
+     (equal
+      (emacspeak-agent-shell-test--capture-events
+        (emacspeak-agent-shell--handle-lifecycle-event
+         '((:event . prompt-steered)
+           (:data (:prompt . "just the filenames") (:outcome . injected)))))
+      '()))
+    ;; The turn had ended, so the prompt went in as an ordinary one.
+    (should
+     (equal
+      (emacspeak-agent-shell-test--capture-events
+        (emacspeak-agent-shell--handle-lifecycle-event
+         '((:event . prompt-steered)
+           (:data (:prompt . "p") (:outcome . prompt-required)))))
+      '((icon item)
+        (speak "Agent was idle. Prompt submitted."))))
+    ;; The agent started a turn nobody asked for; its output will not be
+    ;; attached to anything, which is worth a warning rather than silence.
+    (should
+     (equal
+      (emacspeak-agent-shell-test--capture-events
+        (emacspeak-agent-shell--handle-lifecycle-event
+         '((:event . prompt-steered)
+           (:data (:prompt . "p") (:outcome . started-new-turn)))))
+      '((icon warn-user)
+        (speak "Agent was idle. Started a new turn; its output appears out of turn."))))
+    ;; The steer did not land.  The prompt never reached the agent and the
+    ;; turn that was running was cancelled, so silence would leave work
+    ;; that has stopped sounding as though it were still going.
+    (should
+     (equal
+      (emacspeak-agent-shell-test--capture-events
+        (emacspeak-agent-shell--handle-lifecycle-event
+         '((:event . prompt-steered)
+           (:data (:prompt . "p") (:outcome . declined)))))
+      '((icon warn-user)
+        (speak "Steer declined. Running turn interrupted."))))
+    ;; An outcome this module has no wording for must not read as
+    ;; delivered either.
+    (should
+     (equal
+      (emacspeak-agent-shell-test--capture-events
+        (emacspeak-agent-shell--handle-lifecycle-event
+         '((:event . prompt-steered)
+           (:data (:prompt . "p") (:outcome . something-new)))))
+      '((icon warn-user)
+        (speak "Steer did not land."))))))
+
 (ert-deftest emacspeak-agent-shell-steered-prompt-navigates-as-a-user-prompt ()
   "A steered prompt should be found and bounded by user-prompt navigation.
 
