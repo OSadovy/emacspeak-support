@@ -3478,7 +3478,7 @@ Return speech events plus the target character.  DIRECTION is `forward' or
         (emacspeak-agent-shell-table-data-position 'first)
         (agent-shell-markdown-table-max-width-fraction 1.0))
     (cl-letf (((symbol-function 'agent-shell-markdown--display-width)
-               (lambda () 38)))
+               (lambda (&optional _window) 38)))
       (emacspeak-agent-shell-test--with-rendered-table
           (concat "| Name | Role | Notes |\n"
                   "|---|---|---|\n"
@@ -3647,7 +3647,7 @@ Return speech events plus the target character.  DIRECTION is `forward' or
         (emacspeak-agent-shell-table-data-position 'first)
         (agent-shell-markdown-table-max-width-fraction 1.0))
     (cl-letf (((symbol-function 'agent-shell-markdown--display-width)
-               (lambda () 35)))
+               (lambda (&optional _window) 35)))
       (emacspeak-agent-shell-test--with-rendered-table
           (concat "| Code | Notes |\n"
                   "|---|---|\n"
