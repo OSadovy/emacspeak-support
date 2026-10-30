@@ -3837,6 +3837,65 @@ DISPOSITION, KEEP-COMPOSING and DISMISS are as for
       (emacspeak-agent-shell--speak-viewport-submit
        disposition keep-composing dismiss))))
 
+;; RET at the shell's own prompt runs `agent-shell-submit', which reaches
+;; `comint-send-input' as a function call, so Emacspeak's cue for RET in a
+;; shell never fires here.  A sent or steered prompt gets a cue alone, since
+;; the agent's answer follows; a queued one is also named, because nothing
+;; follows it until the running turn ends.
+(defun emacspeak-agent-shell--speak-shell-submit (disposition)
+  "Cue a prompt the shell has sent, steered or queued, per DISPOSITION."
+  (pcase disposition
+    ('submitted (emacspeak-icon 'more))
+    ('steering (emacspeak-icon 'modified-object))
+    ('queued
+     (emacspeak-icon 'more)
+     (dtk-speak "Prompt queued."))))
+
+(defun emacspeak-agent-shell--shell-submit-disposition (&optional override)
+  "Return how the shell will handle its prompt, or nil when nothing is sent.
+OVERRIDE means it goes through the override route.  Mid-turn,
+`agent-shell-submit' routes the prompt only when there is one, and it is
+read here the same way."
+  (let ((disposition (emacspeak-agent-shell--viewport-submit-disposition
+                      override)))
+    (if (eq disposition 'submitted)
+        disposition
+      (and (fboundp 'agent-shell--prompt-input)
+           (agent-shell--prompt-input)
+           disposition))))
+
+(defun emacspeak-agent-shell--shell-submit-outcome (disposition)
+  "Return DISPOSITION if the submission it describes went out, else nil.
+An idle shell is busy once a prompt has gone out, and still ready after
+an empty one, a `help' or `clear' answered locally, or a submission
+another package held back -- agent-shell-autoreconnect holds one while
+it reconnects."
+  (if (eq disposition 'submitted)
+      (and (memq (ignore-errors (agent-shell-status)) '(busy blocked))
+           disposition)
+    disposition))
+
+(defadvice agent-shell-submit (around emacspeak pre act comp)
+  "Cue whether the prompt was sent, steered or queued."
+  (let ((disposition
+         (and (ems-interactive-p)
+              (emacspeak-agent-shell--shell-submit-disposition
+               (ad-get-arg 0)))))
+    ad-do-it
+    (emacspeak-agent-shell--speak-shell-submit
+     (emacspeak-agent-shell--shell-submit-outcome disposition))))
+
+;; The override command submits by calling `agent-shell-submit' as a
+;; function, so it announces for itself.
+(defadvice agent-shell-submit-override (around emacspeak pre act comp)
+  "Cue whether the prompt was sent, steered or queued."
+  (let ((disposition
+         (and (ems-interactive-p)
+              (emacspeak-agent-shell--shell-submit-disposition :override))))
+    ad-do-it
+    (emacspeak-agent-shell--speak-shell-submit
+     (emacspeak-agent-shell--shell-submit-outcome disposition))))
+
 (defadvice agent-shell-viewport-compose-cancel (around emacspeak pre act comp)
   "Announce an accepted prompt composition cancellation."
   (let ((interactive-p (ems-interactive-p))
@@ -4059,6 +4118,8 @@ DISPOSITION, KEEP-COMPOSING and DISMISS are as for
     (agent-shell-viewport-compose-send around)
     (agent-shell-viewport-compose-send-override around)
     (agent-shell-viewport-compose-cancel around)
+    (agent-shell-submit around)
+    (agent-shell-submit-override around)
     (agent-shell-viewport-view-mode after)
     (agent-shell-viewport-edit-mode after))
   "List of advised functions for Emacspeak agent-shell support.")
@@ -4077,6 +4138,11 @@ DISPOSITION, KEEP-COMPOSING and DISMISS are as for
               emacspeak-agent-shell--advice-list)
   (push '(agent-shell-viewport-compose-send-override around)
         emacspeak-agent-shell--advice-list))
+
+;; And one predating the shell's own submit cues.
+(dolist (function '(agent-shell-submit agent-shell-submit-override))
+  (unless (assq function emacspeak-agent-shell--advice-list)
+    (push (list function 'around) emacspeak-agent-shell--advice-list)))
 
 ;; `defvar' preserves the advice list when this development file is reloaded.
 ;; Add this target explicitly for sessions that loaded an earlier version.

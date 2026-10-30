@@ -3786,7 +3786,8 @@ Return speech events plus the target character.  DIRECTION is `forward' or
    (seq-remove (lambda (entry) (fboundp (car entry)))
                emacspeak-agent-shell--advice-list))
   (dolist (function '(agent-shell-goto-last-interaction
-                      agent-shell-interaction-at-point))
+                      agent-shell-interaction-at-point
+                      agent-shell--prompt-input))
     (should (fboundp function)))
   (should-not (assq 'agent-shell--update-fragment
                     emacspeak-agent-shell--advice-list))
@@ -3926,6 +3927,92 @@ Return speech events plus the target character.  DIRECTION is `forward' or
             (speak "Steering."))))
         (should (equal routes '(:override)))
         (should sent)))))
+
+(defmacro emacspeak-agent-shell-test--with-shell-submit (bindings &rest body)
+  "Run BODY in a fake shell whose agent state BINDINGS describe.
+BINDINGS sets `busy', `input', `sends' and `steers'; BODY sees `routes',
+each busy submission's prompt and override, and `submitted'."
+  (declare (indent 1) (debug t))
+  `(let ((busy nil) (input nil) (sends t) (steers nil)
+         (routes nil) (submitted nil)
+         (agent-shell-session-strategy 'new-deferred)
+         (agent-shell-busy-submit-default-function
+          #'agent-shell-busy-submit-queue)
+         (agent-shell-busy-submit-override-function
+          #'agent-shell-busy-submit-steer))
+     (ignore busy input sends steers routes submitted)
+     (let ,bindings
+       (with-temp-buffer
+         (setq major-mode 'agent-shell-mode)
+         (cl-letf (((symbol-function 'shell-maker-busy) (lambda () busy))
+                   ((symbol-function 'agent-shell-status)
+                    (lambda (&rest _) (if busy 'busy 'ready)))
+                   ((symbol-function 'shell-maker-submit)
+                    (lambda (&rest _)
+                      (setq submitted t)
+                      (when sends (setq busy t))))
+                   ((symbol-function 'agent-shell--prompt-input)
+                    (lambda () input))
+                   ((symbol-function 'agent-shell--busy-submit)
+                    (cl-function
+                     (lambda (&key prompt override)
+                       (push (list prompt override) routes))))
+                   ((symbol-function 'agent-shell--clear-prompt-input)
+                    #'ignore)
+                   ((symbol-function 'agent-shell-steering-supported-p)
+                    (lambda (&rest _) steers)))
+           ,@body)))))
+
+(ert-deftest emacspeak-agent-shell-shell-submit-cues-a-sent-prompt ()
+  "RET in an idle shell should cue the prompt it sent, without words."
+  (emacspeak-agent-shell-test--with-shell-submit ((input "list the files"))
+    (should
+     (equal (emacspeak-agent-shell-test--capture-events
+              (call-interactively #'agent-shell-submit))
+            '((icon more))))
+    (should submitted)))
+
+(ert-deftest emacspeak-agent-shell-shell-submit-is-silent-when-nothing-goes-out ()
+  "An idle shell left ready by RET sent nothing, so nothing is cued.
+That is an empty prompt, and a submission held back while reconnecting."
+  (emacspeak-agent-shell-test--with-shell-submit ((sends nil))
+    (should-not (emacspeak-agent-shell-test--capture-events
+                  (call-interactively #'agent-shell-submit)))
+    (should submitted)))
+
+(ert-deftest emacspeak-agent-shell-shell-submit-names-a-queued-prompt ()
+  "A prompt queued mid-turn should be named as well as cued."
+  (emacspeak-agent-shell-test--with-shell-submit ((busy t)
+                                                  (input "and the tests"))
+    (should
+     (equal (emacspeak-agent-shell-test--capture-events
+              (call-interactively #'agent-shell-submit))
+            '((icon more) (speak "Prompt queued."))))
+    (should (equal routes '(("and the tests" nil))))))
+
+(ert-deftest emacspeak-agent-shell-shell-submit-is-silent-on-an-empty-busy-prompt ()
+  "RET on an empty prompt mid-turn routes nothing, so nothing is cued."
+  (emacspeak-agent-shell-test--with-shell-submit ((busy t))
+    (should-not (emacspeak-agent-shell-test--capture-events
+                  (call-interactively #'agent-shell-submit)))
+    (should-not routes)))
+
+(ert-deftest emacspeak-agent-shell-shell-submit-override-cues-once ()
+  "The override command should cue its own route, once."
+  (emacspeak-agent-shell-test--with-shell-submit ((busy t) (steers t)
+                                                  (input "stop, use make"))
+    (should
+     (equal (emacspeak-agent-shell-test--capture-events
+              (call-interactively #'agent-shell-submit-override))
+            '((icon modified-object))))
+    (should (equal routes '(("stop, use make" (4)))))))
+
+(ert-deftest emacspeak-agent-shell-shell-submit-is-silent-when-called ()
+  "A submission made from code rather than a key should not be cued."
+  (emacspeak-agent-shell-test--with-shell-submit ((input "list the files"))
+    (should-not (emacspeak-agent-shell-test--capture-events
+                  (agent-shell-submit)))
+    (should submitted)))
 
 (ert-deftest emacspeak-agent-shell-viewport-submit-announces-continued-compose ()
   "A prefix submission should say that composition remains available."
