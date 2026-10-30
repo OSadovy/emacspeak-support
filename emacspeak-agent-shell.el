@@ -316,19 +316,6 @@ Zebra striping is purely visual and should not alter table data speech.")
 
 ;;;  Helper Functions
 
-(defun emacspeak-agent-shell--speech-copy-without-yank-handler (text)
-  "Return TEXT prepared for speech without invoking its clipboard handler.
-Agent-shell Markdown uses `yank-handler' to make pasted content plain.  Speech
-must bypass that handler so `dtk-speak' retains faces and other aural display
-properties while copying TEXT into its private scratch buffer."
-  (if (and (stringp text)
-           (> (length text) 0)
-           (text-property-not-all 0 (length text) 'yank-handler nil text))
-      (let ((copy (copy-sequence text)))
-        (remove-text-properties 0 (length copy) '(yank-handler nil) copy)
-        copy)
-    text))
-
 ;; Agent-shell exposes a customizable renderer but no semantic status text
 ;; property.  Keep this glyph/face compatibility adapter isolated here; the
 ;; rendered-plan fixture test detects upstream rendering drift.
@@ -398,8 +385,7 @@ icon's text properties so its status voice remains available to Emacspeak."
            (derived-mode-p 'agent-shell-mode
                            'agent-shell-viewport-view-mode
                            'agent-shell-viewport-edit-mode))
-      (emacspeak-agent-shell--replace-status-icons-for-speech
-       (emacspeak-agent-shell--speech-copy-without-yank-handler text))
+      (emacspeak-agent-shell--replace-status-icons-for-speech text)
     text))
 
 (defconst emacspeak-agent-shell--vertical-toggle-hint-regexp

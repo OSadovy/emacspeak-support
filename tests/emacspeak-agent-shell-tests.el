@@ -146,8 +146,6 @@
                   "emacspeak-agent-shell" ())
 (declare-function emacspeak-agent-shell--response-section-setup
                   "emacspeak-agent-shell" ())
-(declare-function emacspeak-agent-shell--speech-copy-without-yank-handler
-                  "emacspeak-agent-shell" (text))
 (declare-function emacspeak-agent-shell--install-speech-control-bindings
                   "emacspeak-agent-shell" ())
 (declare-function emacspeak-agent-shell--filter-vertical-toggle-hint
@@ -4236,40 +4234,6 @@ That is an empty prompt, and a submission held back while reconnecting."
         (should (eq (dtk-get-style) (cdr entry)))
         (should (equal (get-text-property (point) 'face)
                        (get-text-property (point) 'font-lock-face)))))))
-
-(ert-deftest emacspeak-agent-shell-speech-copy-bypasses-plain-yank-handler ()
-  "Speech copies should retain rendered faces without changing normal paste."
-  (with-temp-buffer
-    (insert "# Heading\n\n| Name | Value |\n| --- | --- |\n| One | 1 |\n")
-    (agent-shell-markdown-replace-markup)
-    (let ((rendered (buffer-string)))
-      (should (eq (emacspeak-agent-shell--prepare-speech-text rendered)
-                  rendered))
-      (setq major-mode 'agent-shell-mode)
-      (let ((spoken
-             (emacspeak-agent-shell--prepare-speech-text rendered)))
-        (should
-         (text-property-not-all
-          0 (length rendered) 'yank-handler nil rendered))
-        (should-not
-         (text-property-not-all
-          0 (length spoken) 'yank-handler nil spoken))
-        (should
-         (eq (emacspeak-agent-shell-test--face-at-text spoken "Heading")
-             'agent-shell-markdown-header-1))
-        (should
-         (eq (emacspeak-agent-shell-test--face-at-text spoken "│")
-             'agent-shell-markdown-table-border))
-        ;; Preparing speech must not change agent-shell's clipboard contract.
-        (should
-         (text-property-not-all
-          0 (length (buffer-string)) 'yank-handler nil (buffer-string)))
-        ;; Exercise the same copy primitive used by `dtk-speak'.
-        (with-temp-buffer
-          (let ((yank-excluded-properties dtk-yank-excluded-properties))
-            (insert-for-yank spoken))
-          (goto-char (point-min))
-          (should (eq (dtk-get-style) 'voice-brighten)))))))
 
 (ert-deftest emacspeak-agent-shell-disable-cleans-existing-buffer-state ()
   "Disabling support should cancel pending work in existing shell buffers."
