@@ -243,6 +243,12 @@ for the active speech server to interpret."
    emacspeak-pronounce-rfc-3339-datetime-pattern
    (cons 're-search-forward
          'emacspeak-pronounce-decode-rfc-3339-datetime))
+  ;; Chat mode draws this marker over the characters spelling the prompt, so
+  ;; it is the whole of that row until something is typed.  No synthesizer
+  ;; here has a name for it, which would leave the row silent -- and silence
+  ;; is what a reader gets for arriving at the place they type.
+  (emacspeak-pronounce-add-dictionary-entry
+   'agent-shell-mode "❯" " prompt ")
   (emacspeak-pronounce-refresh-pronunciations))
 
 ;;;  Voice Personalities
