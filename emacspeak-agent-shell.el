@@ -265,6 +265,7 @@ for the active speech server to interpret."
     (agent-shell-session-date voice-monotone-extra)
     (agent-shell-section-heading voice-bolden)
     (agent-shell-section-annotation voice-monotone)
+    (agent-shell-thought-body voice-lighten)
     (agent-shell-success voice-brighten-extra)
     (agent-shell-warning voice-brighten)
     (agent-shell-error voice-bolden-and-animate)
@@ -283,9 +284,13 @@ for the active speech server to interpret."
   "Voice personalities for current agent-shell interface faces.")
 
 (defconst emacspeak-agent-shell--ui-unvoiced-faces
-  '(agent-shell-viewport-status-view)
+  '(agent-shell-viewport-status-view
+    agent-shell-chat-me-label
+    agent-shell-chat-agent-label
+    agent-shell-diff-changes-label)
   "Agent-shell interface faces intentionally left without a voice.
-The neutral viewport view face carries no state beyond its spoken text.")
+The neutral viewport view face carries no state beyond its spoken text,
+and the labels say what they mark in words.")
 
 (defconst emacspeak-agent-shell--markdown-face-voice-map
   '((agent-shell-markdown-bold voice-bolden)
@@ -307,9 +312,15 @@ The neutral viewport view face carries no state beyond its spoken text.")
   "Voice personalities for current agent-shell Markdown faces.")
 
 (defconst emacspeak-agent-shell--markdown-unvoiced-faces
-  '(agent-shell-markdown-table-zebra)
+  '(agent-shell-markdown-table-zebra
+    agent-shell-markdown-table
+    agent-shell-markdown-list-marker
+    agent-shell-markdown-list-done)
   "Agent-shell Markdown faces intentionally left without a voice.
-Zebra striping is purely visual and should not alter table data speech.")
+Zebra striping is purely visual and should not alter table data speech.
+The table face is the base of every table character, so a voice there
+would change every cell.  List markers are spoken as themselves, and a
+completed item's checkbox already says it is done.")
 
 (voice-setup-add-map emacspeak-agent-shell--ui-face-voice-map)
 (voice-setup-add-map emacspeak-agent-shell--markdown-face-voice-map)

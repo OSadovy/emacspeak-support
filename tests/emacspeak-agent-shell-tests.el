@@ -4184,7 +4184,7 @@ That is an empty prompt, and a submission held back while reconnecting."
            (face-list))
           (lambda (a b) (string< (symbol-name a) (symbol-name b))))))
     (should (equal configured current))
-    (should (= 17 (length configured)))
+    (should (= 20 (length configured)))
     (dolist (face configured)
       (should (facep face)))))
 
