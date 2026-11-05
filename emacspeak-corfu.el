@@ -90,7 +90,7 @@
         (total (length corfu--candidates))
         (index (1+ corfu--index)))
     (when candidate
-      (dtk-speak (format "%d of %d: %s" index total candidate)))))
+      (dtk-speak (format "%s %d of %d" candidate index total)))))
 
 ;;;  Advice interactive commands:
 
@@ -121,10 +121,17 @@
     (emacspeak-icon 'item)
     (dtk-speak "separator")))
 
-(defadvice corfu-complete (after emacspeak pre act comp)
-  "Speak completion feedback."
-  (when (ems-interactive-p)
-    (emacspeak-icon 'complete)))
+(defadvice corfu-complete (around emacspeak pre act comp)
+  "Speak the completed input."
+  (let ((beg (car completion-in-region--data))
+        (tick (buffer-chars-modified-tick)))
+    ad-do-it
+    (when (ems-interactive-p)
+      (emacspeak-icon 'complete)
+      (when (/= tick (buffer-chars-modified-tick))
+        (tts-with-punctuations
+         'all (dtk-speak (buffer-substring beg (point))))))
+    ad-return-value))
 
 ;;; Batch advice for navigation commands:
 
@@ -162,6 +169,19 @@
        emacspeak-corfu--prev-candidate new-cand
        emacspeak-corfu--prev-index corfu--index))))
 
+(defadvice corfu--in-region-1 (around emacspeak pre act comp)
+  "Speak a completion inserted without opening the popup.
+Corfu inserts a sole match directly, from whichever command completed."
+  (let ((beg (ad-get-arg 0))
+        (tick (buffer-chars-modified-tick)))
+    ad-do-it
+    (unless (or completion-in-region-mode
+                (= tick (buffer-chars-modified-tick)))
+      (emacspeak-icon 'complete)
+      (tts-with-punctuations
+       'all (dtk-speak (buffer-substring beg (point)))))
+    ad-return-value))
+
 ;;;  Setup hooks:
 
 (defun emacspeak-corfu--completion-hook ()
@@ -186,14 +206,15 @@
     (corfu-quit after)
     (corfu-reset after)
     (corfu-insert-separator after)
-    (corfu-complete after)
+    (corfu-complete around)
     (corfu-next after)
     (corfu-previous after)
     (corfu-first after)
     (corfu-last after)
     (corfu-scroll-up after)
     (corfu-scroll-down after)
-    (corfu--update after))
+    (corfu--update after)
+    (corfu--in-region-1 around))
   "List of advised functions for Emacspeak Corfu support.")
 
 (defun emacspeak-corfu-enable ()

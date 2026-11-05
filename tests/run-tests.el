@@ -40,6 +40,9 @@
 (load (expand-file-name "emacspeak-agent-shell-tests.el"
                         (file-name-directory load-file-name))
       nil nil t)
+(load (expand-file-name "emacspeak-corfu-tests.el"
+                        (file-name-directory load-file-name))
+      nil nil t)
 (load (expand-file-name "emacspeak-windows-speech-tests.el"
                         (file-name-directory load-file-name))
       nil nil t)
