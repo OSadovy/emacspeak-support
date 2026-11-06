@@ -83,6 +83,28 @@ test is not; `corfu--exhibit' is what its post-command hook runs."
       (should completion-in-region-mode)
       (should (equal events '((icon open-object)))))))
 
+(ert-deftest emacspeak-corfu-opened-with-nothing-selected-speaks-the-input ()
+  (let ((default-directory (make-temp-file "emacspeak-corfu-" t)))
+    (unwind-protect
+        (progn
+          (make-directory "tmp/a" t)
+          (make-directory "tmp/b" t)
+          (with-temp-buffer
+            (let ((events
+                   (emacspeak-corfu-test--recording
+                     (emacspeak-corfu-test--open "tm" #'completion-file-name-table))))
+              (should (equal (buffer-string) "tmp/"))
+              (should (< corfu--index 0))
+              (should (equal (car (last events)) '(speak "tmp/ 2 candidates"))))))
+      (delete-directory default-directory t))))
+
+(ert-deftest emacspeak-corfu-opened-with-a-selection-speaks-the-candidate ()
+  (with-temp-buffer
+    (let ((events
+           (emacspeak-corfu-test--recording
+             (emacspeak-corfu-test--open "os.pa" '("os.path" "os.pardir")))))
+      (should (equal (car (last events)) '(speak "os.path 1 of 2"))))))
+
 (ert-deftest emacspeak-corfu-complete-speaks-the-completed-input ()
   (with-temp-buffer
     (let ((events

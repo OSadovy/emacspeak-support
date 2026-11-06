@@ -92,6 +92,16 @@
     (when candidate
       (dtk-speak (format "%s %d of %d" candidate index total)))))
 
+(defun emacspeak-corfu--speak-input ()
+  "Speak the input being completed, and how many candidates there are."
+  (let ((total (length corfu--candidates)))
+    (tts-with-punctuations
+     'all
+     (dtk-speak (format "%s %d candidate%s"
+                        (buffer-substring (car completion-in-region--data)
+                                          (cadr completion-in-region--data))
+                        total (if (= total 1) "" "s"))))))
+
 ;;;  Advice interactive commands:
 
 (defadvice corfu-insert (around emacspeak pre act comp)
@@ -159,12 +169,17 @@
              (boundp 'corfu--candidates)
              corfu--candidates)
     (let ((new-cand (emacspeak-corfu--current-candidate)))
-      (unless (equal emacspeak-corfu--prev-candidate new-cand)
+      (cond
+       ;; Opened with nothing selected, because the input is already a valid
+       ;; answer -- a completed directory, say -- so the input is the news.
+       ((and (null emacspeak-corfu--prev-index) (null new-cand))
+        (emacspeak-corfu--speak-input))
+       ((not (equal emacspeak-corfu--prev-candidate new-cand))
         (when (and (not (equal corfu--index emacspeak-corfu--prev-index))
                    (>= corfu--index 0))
           (emacspeak-icon 'select-object))
         (when new-cand
-          (emacspeak-corfu--speak-candidate)))
+          (emacspeak-corfu--speak-candidate))))
       (setq-local
        emacspeak-corfu--prev-candidate new-cand
        emacspeak-corfu--prev-index corfu--index))))
